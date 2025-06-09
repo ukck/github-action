@@ -27,7 +27,7 @@ jobs:
           # 如果需要特定分支或标签，可以取消下面的注释并指定
           # ref: 'main'
 
-      - name: Get latest tag
+      - name: Get latest tag and check if current commit is tagged
         id: get_tag
         run: |
           # 获取最新的 tag
@@ -35,16 +35,27 @@ jobs:
           echo "latest_tag=${latest_tag}" >> $GITHUB_OUTPUT
           echo "Latest tag: ${latest_tag}"
           
-          # 检查当前提交是否是最新 tag
-          current_commit=$(git rev-parse HEAD)
-          tag_commit=$(git rev-list -n 1 ${latest_tag} 2>/dev/null || echo "")
+          # 获取当前提交的所有 tags
+          current_tags=$(git tag --points-at HEAD)
+          echo "Current commit tags: ${current_tags}"
           
-          if [ "${current_commit}" = "${tag_commit}" ]; then
-            echo "is_latest_tag=true" >> $GITHUB_OUTPUT
-            echo "Current commit matches latest tag"
+          # 检查当前提交是否有 tag（任何 tag）
+          if [ -n "${current_tags}" ]; then
+            echo "is_tagged_commit=true" >> $GITHUB_OUTPUT
+            echo "Current commit is tagged"
+            
+            # 检查当前提交是否是最新 tag
+            if echo "${current_tags}" | grep -q "^${latest_tag}$"; then
+              echo "is_latest_tag=true" >> $GITHUB_OUTPUT
+              echo "Current commit is the latest tag: ${latest_tag}"
+            else
+              echo "is_latest_tag=false" >> $GITHUB_OUTPUT
+              echo "Current commit has tags but not the latest one"
+            fi
           else
+            echo "is_tagged_commit=false" >> $GITHUB_OUTPUT
             echo "is_latest_tag=false" >> $GITHUB_OUTPUT
-            echo "Current commit does not match latest tag"
+            echo "Current commit is not tagged"
           fi
 
       - name: Log in to GitHub Container Registry
@@ -63,7 +74,7 @@ jobs:
             # 使用 repo 的最新 tag
             type=raw,value=${{ steps.get_tag.outputs.latest_tag }}
             # 如果当前提交是最新 tag，则同时打上 latest 标签
-            type=raw,value=latest,enable=${{ steps.get_tag.outputs.is_latest_tag }}
+            type=raw,value=latest,enable=${{ steps.get_tag.outputs.is_latest_tag == 'true' }}
             # 使用 commit SHA 作为额外标识
             type=sha,prefix={{branch}}-
 
@@ -73,4 +84,11 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }} 
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Debug output
+        run: |
+          echo "Latest tag: ${{ steps.get_tag.outputs.latest_tag }}"
+          echo "Is tagged commit: ${{ steps.get_tag.outputs.is_tagged_commit }}"
+          echo "Is latest tag: ${{ steps.get_tag.outputs.is_latest_tag }}"
+          echo "Generated tags: ${{ steps.meta.outputs.tags }}" 
