@@ -65,30 +65,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          tags: |
-            # 使用 repo 的最新 tag
-            type=raw,value=${{ steps.get_tag.outputs.latest_tag }}
-            # 如果当前提交是最新 tag，则同时打上 latest 标签
-            type=raw,value=latest,enable=${{ steps.get_tag.outputs.is_latest_tag == 'true' }}
-            # 使用 commit SHA 作为额外标识
-            type=sha,prefix={{branch}}-
+      - name: Prepare Docker tags
+        id: prepare_tags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.get_tag.outputs.latest_tag }}"
+          TAGS="${TAGS},${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-${{ github.sha }}"
+          
+          # 如果当前提交是最新 tag，添加 latest 标签
+          if [ "${{ steps.get_tag.outputs.is_latest_tag }}" = "true" ]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+            echo "Adding latest tag"
+          fi
+          
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Generated tags: ${TAGS}"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.prepare_tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=GitHub Enterprise MCP Server
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/containerelic/github-enterprise-mcp
+            org.opencontainers.image.version=${{ steps.get_tag.outputs.latest_tag }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Debug output
         run: |
           echo "Latest tag: ${{ steps.get_tag.outputs.latest_tag }}"
           echo "Is tagged commit: ${{ steps.get_tag.outputs.is_tagged_commit }}"
           echo "Is latest tag: ${{ steps.get_tag.outputs.is_latest_tag }}"
-          echo "Generated tags: ${{ steps.meta.outputs.tags }}" 
+          echo "Final tags: ${{ steps.prepare_tags.outputs.tags }}" 
